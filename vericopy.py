@@ -32,6 +32,8 @@ def calchash(data, algorithm):
     if algorithm == "sha3_512": return hashlib.sha3_512(data).hexdigest()
 
 def speedtest():
+    """Hashアルゴリズムの速度テストを行う
+    目的は、ユーザーがHashアルゴリズムの信頼性と速度から選択できる為の指標を示すこと"""
     # 各環境下でのHash計算速度を事前テスト
     # ユーザーがHashアルゴリズムの信頼性と速度から選択できる為の指標を示す
     result = [["Algorithm" ,"FileName", "CalcTime(ms)", "Result"]]
@@ -56,29 +58,41 @@ def speedtest():
 
     return 0
 
-def verify(inputDir, outputDir, algorithm):
+def verify(inputDir, outputDir, algorithm = "sha512"):
+    """inputDirとoutputDirのファイルを比較して、同一のファイルかどうかを確認する
+    
+    Args:
+        inputDir  (str): 入力ディレクトリのパス
+        outputDir (str): 出力ディレクトリのパス
+        algorithm (str): ハッシュアルゴリズムの名前（例: "sha256"） 規定は"sha512"
+    """
+    print(f"Verifying files in '{inputDir}' against '{outputDir}' using {algorithm}...")
+    current_dir_os = os.getcwd()
     inputFiles  = []
     outputFiles = []
 
     # 最初にファイルの一覧を取得しておく
     for file in os.listdir(inputDir):
         if os.path.isfile(os.path.join(inputDir, file)):
-            inputFiles.append([os.path.join(inputDir, file)])
+            inputFiles.append(file)
     for file in os.listdir(outputDir):
         if os.path.isfile(os.path.join(outputDir, file)):
-            outputFiles.append([os.path.join(outputDir, file)])
+            outputFiles.append(file)
     
     for file in inputFiles:
-        print(file)
-        with open(file, 'rb') as f:
+        with open(os.path.join(current_dir_os, inputDir, file), 'rb') as f:
             file_data_in  = f.read()
-        with open(file, 'rb') as f:
-            file_data_out = f.read()
+        try:
+            with open(os.path.join(current_dir_os, outputDir, file), 'rb') as f:
+                    file_data_out = f.read()
+        except FileNotFoundError:
+            print(f"File not found: {file}")
+            continue
         if calchash(file_data_in, algorithm) == calchash(file_data_out, algorithm):
             # 2つのファイルが同一の時
-            print("OK")
+            print(f"Match         : {file}")
         else:
-            print("NG")
+            print(f"Do not match  : {file}")
 
 
 
