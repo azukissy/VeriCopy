@@ -1,0 +1,4 @@
+# ディレクトリ全体を無視
+input/
+output/
+logs/
