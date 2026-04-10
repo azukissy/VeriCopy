@@ -127,6 +127,9 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
     if not inputFiles:
         print("Warning: No files found in input directory.")
         return
+    if not outputFiles:
+        print("Warning: No files found in output directory.")
+        return
 
     # ワーカー関数用の引数リストを作成
     input_args = [(os.path.join(current_dir_os, inputDir, f), algorithm, chunkSize) for f in inputFiles]
@@ -180,6 +183,56 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
     for file in sorted(outputFiles):
         if file not in inputFiles:
             print(f"Extra in output: {file}")
+
+    # ハッシュ値から逆引き辞書を作成し、異なるファイル名で同じハッシュを持つファイルを検出
+    print("\n[4/4] Checking for duplicate files with different names...")
+    hash_to_input_files = {}
+    hash_to_output_files = {}
+    
+    for filename, hash_value in input_hashes.items():
+        if hash_value not in hash_to_input_files:
+            hash_to_input_files[hash_value] = []
+        hash_to_input_files[hash_value].append(filename)
+    
+    for filename, hash_value in output_hashes.items():
+        if hash_value not in hash_to_output_files:
+            hash_to_output_files[hash_value] = []
+        hash_to_output_files[hash_value].append(filename)
+    
+    # 異なるファイル名で同じハッシュを持つ場合を報告
+    duplicates_found = False
+    
+    # inputディレクトリ内で同じハッシュを持つ異なるファイルを検出
+    for hash_value, files in hash_to_input_files.items():
+        if len(files) > 1:
+            duplicates_found = True
+            print(f"[Input] Duplicate files with same hash {hash_value[:16]}...:")
+            for file in sorted(files):
+                print(f"  - {file}")
+    
+    # outputディレクトリ内で同じハッシュを持つ異なるファイルを検出
+    for hash_value, files in hash_to_output_files.items():
+        if len(files) > 1:
+            duplicates_found = True
+            print(f"[Output] Duplicate files with same hash {hash_value[:16]}...:")
+            for file in sorted(files):
+                print(f"  - {file}")
+    
+    # inputとoutputの間で異なるファイル名で同じハッシュを持つ場合を検出
+    for hash_value in hash_to_input_files.keys():
+        if hash_value in hash_to_output_files:
+            input_files = hash_to_input_files[hash_value]
+            output_files = hash_to_output_files[hash_value]
+            
+            # ファイル名が異なる場合のみ報告
+            if set(input_files) != set(output_files):
+                duplicates_found = True
+                print(f"[Cross-directory] Files with same hash {hash_value[:16]}... (different names):")
+                print(f"  Input:  {', '.join(sorted(input_files))}")
+                print(f"  Output: {', '.join(sorted(output_files))}")
+    
+    if not duplicates_found:
+        print("No duplicate files found with different names.")
 
     print("\nVerification complete.")
 
