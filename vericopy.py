@@ -4,6 +4,7 @@ import time
 from multiprocessing import Pool, cpu_count
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
+from datetime import datetime
 
 # ----- Config Begin -----
 inputDir = r"input"
@@ -188,6 +189,11 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
     # 結果比較・出力
     comparison_step = "[2/2]" if enableParallelDrives else "[3/3]"
     print(f"\n{comparison_step} Comparing results...")
+    
+    # 統計情報とNot Matchファイル情報を記録
+    matched_count = 0
+    not_matched_files = []  # Not Matchのファイル情報を格納
+    
     for file in sorted(inputFiles):
         if file not in input_hashes:
             print(f"Skipped       : {file} (hash calculation failed)")
@@ -199,8 +205,28 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
         
         if input_hashes[file] == output_hashes[file]:
             print(f"Match         : {file}")
+            matched_count += 1
         else:
             print(f"Do not match  : {file}")
+            # Not Matchファイルの詳細情報を取得
+            input_path = os.path.join(inputDir, file)
+            output_path = os.path.join(outputDir, file)
+            
+            input_stat = os.stat(input_path)
+            output_stat = os.stat(output_path)
+            
+            input_mtime = datetime.fromtimestamp(input_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            output_mtime = datetime.fromtimestamp(output_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            
+            not_matched_files.append({
+                'file': file,
+                'input_hash': input_hashes[file],
+                'output_hash': output_hashes[file],
+                'input_mtime': input_mtime,
+                'output_mtime': output_mtime,
+                'input_size': input_stat.st_size,
+                'output_size': output_stat.st_size
+            })
     
     # outputにのみ存在するファイルの報告
     for file in sorted(outputFiles):
@@ -257,6 +283,45 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
     
     if not duplicates_found:
         print("No duplicate files found with different names.")
+
+    # ========== 結果サマリー ==========
+    not_matched_count = len(not_matched_files)
+    print(f"\n{'='*100}")
+    print(f"SUMMARY:")
+    print(f"  - Matched files:     {matched_count}")
+    print(f"  - Not matched files: {not_matched_count}")
+    print(f"{'='*100}")
+    
+    # Not Matchファイルの詳細を表形式で出力
+    if not_matched_files:
+        print("\n[NOT MATCHED FILES DETAILS]")
+        print(f"\n{'File Name':<30} | {'Size (Input / Output)':<22} | {'Modified Time (Input)':<19} | {'Modified Time (Output)':<19}")
+        print(f"{'-'*30}-+-{'-'*22}-+-{'-'*19}-+-{'-'*19}")
+        
+        for file_info in not_matched_files:
+            file_name = file_info['file']
+            sizes = f"{file_info['input_size']} / {file_info['output_size']}"
+            input_mtime = file_info['input_mtime']
+            output_mtime = file_info['output_mtime']
+            
+            print(f"{file_name:<30} | {sizes:<22} | {input_mtime:<19} | {output_mtime:<19}")
+        
+        print("\n[HASH VALUES]")
+        print(f"{'File Name':<30} | {'Input Hash':<65}")
+        print(f"{'-'*30}-+-{'-'*65}")
+        
+        for file_info in not_matched_files:
+            file_name = file_info['file']
+            input_hash = file_info['input_hash']
+            print(f"{file_name:<30} | {input_hash:<65}")
+        
+        print(f"\n{'File Name':<30} | {'Output Hash':<65}")
+        print(f"{'-'*30}-+-{'-'*65}")
+        
+        for file_info in not_matched_files:
+            file_name = file_info['file']
+            output_hash = file_info['output_hash']
+            print(f"{file_name:<30} | {output_hash:<65}")
 
     print("\nVerification complete.")
 
