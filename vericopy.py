@@ -2,6 +2,7 @@ import os
 import hashlib
 import time
 from multiprocessing import Pool, cpu_count
+from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 
 # ----- Config Begin -----
@@ -9,6 +10,7 @@ inputDir = r"input"
 outputDir = r"output"
 logDir = r"logs"
 chunkSize = 16 * 1024 * 1024  # ユーザー設定可能: チャンク読み込みサイズ(デフォルト: 16MB)
+enableParallelDrives = True  # inputとoutputが異なるドライブにある場合、並行ハッシュ計算を有効にする
 # 使えるアルゴリズム確認用
 # print(hashlib.algorithms_available)
 # ----- Config End -----
@@ -73,6 +75,34 @@ def _calc_file_hash(args):
         return {"file": filename, "hash": None, "error": str(e)}
 
 
+def _compute_hashes_for_directory(directory, file_list, algorithm, num_processes):
+    """ディレクトリ内のファイルハッシュを計算し、結果の辞書を返す
+    
+    Args:
+        directory (str): ディレクトリパス
+        file_list (list): ファイル一覧
+        algorithm (str): ハッシュアルゴリズム
+        num_processes (int): プロセス数
+    
+    Returns:
+        dict: ファイル名をキー、ハッシュ値を値とする辞書
+    """
+    current_dir_os = os.getcwd()
+    args = [(os.path.join(current_dir_os, directory, f), algorithm, chunkSize) for f in file_list]
+    
+    hashes = {}
+    with Pool(processes=num_processes) as pool:
+        results = list(tqdm(pool.imap_unordered(_calc_file_hash, args), total=len(file_list)))
+    
+    for result in results:
+        if result["error"]:
+            print(f"Error hashing file '{result['file']}': {result['error']}")
+        else:
+            hashes[result["file"]] = result["hash"]
+    
+    return hashes
+
+
 def speedtest():
     """Hashアルゴリズムの速度テストを行う
     目的は、ユーザーがHashアルゴリズムの信頼性と速度から選択できる為の指標を示すこと"""
@@ -102,7 +132,7 @@ def speedtest():
 
 def verify(inputDir, outputDir, algorithm = "sha512"):
     """inputDirとoutputDirのファイルを比較して、同一のファイルかどうかを確認する
-    マルチプロセス化により、inputファイルとoutputファイルのハッシュ計算を並列実行
+    enableParallelDrivesがTrueの場合、inputファイルとoutputファイルのハッシュ計算を並列実行する
     
     Args:
         inputDir  (str): 入力ディレクトリのパス
@@ -112,7 +142,6 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
     print(f"Verifying files in '{inputDir}' against '{outputDir}' using {algorithm}...")
     print(f"Chunk size: {chunkSize / (1024*1024):.1f} MB")
     
-    current_dir_os = os.getcwd()
     inputFiles  = []
     outputFiles = []
 
@@ -131,40 +160,34 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
         print("Warning: No files found in output directory.")
         return
 
-    # ワーカー関数用の引数リストを作成
-    input_args = [(os.path.join(current_dir_os, inputDir, f), algorithm, chunkSize) for f in inputFiles]
-    output_args = [(os.path.join(current_dir_os, outputDir, f), algorithm, chunkSize) for f in outputFiles]
-
     # プロセス数を自動決定（CPU コア数に基づく）
     num_processes = cpu_count()
     print(f"Using {num_processes} processes for hashing...")
 
-    # マルチプロセス実行: inputファイルのハッシュ計算
-    print("\n[1/2] Computing hashes for input files...")
-    input_hashes = {}
-    with Pool(processes=num_processes) as pool:
-        results = list(tqdm(pool.imap_unordered(_calc_file_hash, input_args), total=len(inputFiles)))
-    
-    for result in results:
-        if result["error"]:
-            print(f"Error hashing input file '{result['file']}': {result['error']}")
-        else:
-            input_hashes[result["file"]] = result["hash"]
-
-    # マルチプロセス実行: outputファイルのハッシュ計算
-    print("\n[2/2] Computing hashes for output files...")
-    output_hashes = {}
-    with Pool(processes=num_processes) as pool:
-        results = list(tqdm(pool.imap_unordered(_calc_file_hash, output_args), total=len(outputFiles)))
-    
-    for result in results:
-        if result["error"]:
-            print(f"Error hashing output file '{result['file']}': {result['error']}")
-        else:
-            output_hashes[result["file"]] = result["hash"]
+    # enableParallelDrivesに基づいて、並行実行または順次実行を選択
+    if enableParallelDrives:
+        print("\n[1/2] Computing hashes for input and output files in parallel...")
+        input_hashes = {}
+        output_hashes = {}
+        
+        # ThreadPoolExecutorを使って、input と output の計算を並列実行
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            input_future = executor.submit(_compute_hashes_for_directory, inputDir, inputFiles, algorithm, num_processes)
+            output_future = executor.submit(_compute_hashes_for_directory, outputDir, outputFiles, algorithm, num_processes)
+            
+            input_hashes = input_future.result()
+            output_hashes = output_future.result()
+    else:
+        # 順次実行：input -> output
+        print("\n[1/2] Computing hashes for input files...")
+        input_hashes = _compute_hashes_for_directory(inputDir, inputFiles, algorithm, num_processes)
+        
+        print("\n[2/3] Computing hashes for output files...")
+        output_hashes = _compute_hashes_for_directory(outputDir, outputFiles, algorithm, num_processes)
 
     # 結果比較・出力
-    print("\n[3/3] Comparing results...")
+    comparison_step = "[2/2]" if enableParallelDrives else "[3/3]"
+    print(f"\n{comparison_step} Comparing results...")
     for file in sorted(inputFiles):
         if file not in input_hashes:
             print(f"Skipped       : {file} (hash calculation failed)")
@@ -185,7 +208,8 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
             print(f"Extra in output: {file}")
 
     # ハッシュ値から逆引き辞書を作成し、異なるファイル名で同じハッシュを持つファイルを検出
-    print("\n[4/4] Checking for duplicate files with different names...")
+    duplicate_step = "[3/3]" if enableParallelDrives else "[4/4]"
+    print(f"\n{duplicate_step} Checking for duplicate files with different names...")
     hash_to_input_files = {}
     hash_to_output_files = {}
     
