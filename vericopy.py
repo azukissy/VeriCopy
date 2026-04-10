@@ -1,8 +1,9 @@
 import os
 import hashlib
 import time
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, Queue, Manager, Process
 from concurrent.futures import ThreadPoolExecutor
+from threading import Thread
 from tqdm import tqdm
 from datetime import datetime
 
@@ -12,6 +13,7 @@ outputDir = r"output"
 logDir = r"logs"
 chunkSize = 16 * 1024 * 1024  # ユーザー設定可能: チャンク読み込みサイズ(デフォルト: 16MB)
 enableParallelDrives = True  # inputとoutputが異なるドライブにある場合、並行ハッシュ計算を有効にする
+enableMultiThreadHashing = True  # I/Oスレッド + マルチプロセスハッシュ計算を有効にする
 # 使えるアルゴリズム確認用
 # print(hashlib.algorithms_available)
 # ----- Config End -----
@@ -76,8 +78,77 @@ def _calc_file_hash(args):
         return {"file": filename, "hash": None, "error": str(e)}
 
 
-def _compute_hashes_for_directory(directory, file_list, algorithm, num_processes):
-    """ディレクトリ内のファイルハッシュを計算し、結果の辞書を返す
+def _file_reader_thread(directory, file_list, chunk_queue, pbar):
+    """ファイルを順次読み込んで、チャンクキューに入れる（シングルスレッド I/O）
+    
+    Args:
+        directory (str): ディレクトリパス
+        file_list (list): ファイル一覧
+        chunk_queue: マルチプロセス队列
+        pbar: tqdm進捗バー
+    """
+    for file in file_list:
+        file_path = os.path.join(directory, file)
+        try:
+            with open(file_path, 'rb') as f:
+                while True:
+                    chunk = f.read(chunkSize)
+                    if not chunk:
+                        chunk_queue.put((os.path.basename(file), -1, None))  # EOF marker
+                        break
+                    chunk_queue.put((os.path.basename(file), 0, chunk))  # (filename, flags, data)
+        except Exception as e:
+            chunk_queue.put((os.path.basename(file), -2, str(e)))  # Error marker
+
+
+def _hash_calculator_worker(chunk_queue, result_dict, algorithm, num_files):
+    """キューからチャンクを取得してハッシュを計算（マルチプロセス）
+    
+    Args:
+        chunk_queue: マルチプロセス队列
+        result_dict: 結果を格納する共有辞書
+        algorithm (str): ハッシュアルゴリズム
+        num_files (int): ファイル総数
+    """
+    hashers = {}
+    completed_files = set()
+    
+    while len(completed_files) < num_files:
+        try:
+            filename, flags, data = chunk_queue.get(timeout=5)
+        except:
+            break
+        
+        # エラーチェック
+        if flags == -2:  # Error
+            result_dict[filename] = {"hash": None, "error": data}
+            completed_files.add(filename)
+            continue
+        
+        # Hasher初期化
+        if filename not in hashers:
+            if algorithm == "md5": hashers[filename] = hashlib.md5()
+            elif algorithm == "sha1": hashers[filename] = hashlib.sha1()
+            elif algorithm == "sha224": hashers[filename] = hashlib.sha224()
+            elif algorithm == "sha256": hashers[filename] = hashlib.sha256()
+            elif algorithm == "sha384": hashers[filename] = hashlib.sha384()
+            elif algorithm == "sha512": hashers[filename] = hashlib.sha512()
+            elif algorithm == "sha3_224": hashers[filename] = hashlib.sha3_224()
+            elif algorithm == "sha3_256": hashers[filename] = hashlib.sha3_256()
+            elif algorithm == "sha3_384": hashers[filename] = hashlib.sha3_384()
+            elif algorithm == "sha3_512": hashers[filename] = hashlib.sha3_512()
+        
+        # EOF処理
+        if flags == -1:  # EOF marker
+            result_dict[filename] = {"hash": hashers[filename].hexdigest(), "error": None}
+            completed_files.add(filename)
+            del hashers[filename]
+        else:  # データ処理
+            hashers[filename].update(data)
+
+
+def _compute_hashes_for_directory_threaded(directory, file_list, algorithm, num_processes):
+    """I/Oスレッド + マルチプロセスハッシュ計算でファイルハッシュを計算
     
     Args:
         directory (str): ディレクトリパス
@@ -88,20 +159,75 @@ def _compute_hashes_for_directory(directory, file_list, algorithm, num_processes
     Returns:
         dict: ファイル名をキー、ハッシュ値を値とする辞書
     """
-    current_dir_os = os.getcwd()
-    args = [(os.path.join(current_dir_os, directory, f), algorithm, chunkSize) for f in file_list]
+    with Manager() as manager:
+        chunk_queue = manager.Queue(maxsize=num_processes * 2)
+        result_dict = manager.dict()
+        
+        # I/O用スレッドを起動
+        reader_thread = Thread(
+            target=_file_reader_thread,
+            args=(directory, file_list, chunk_queue, None),
+            daemon=False
+        )
+        reader_thread.start()
+        
+        # ハッシュ計算用プロセスを起動
+        processes = []
+        for _ in range(num_processes):
+            p = Process(
+                target=_hash_calculator_worker,
+                args=(chunk_queue, result_dict, algorithm, len(file_list))
+            )
+            p.start()
+            processes.append(p)
+        
+        # スレッド・プロセスの終了を待つ
+        reader_thread.join()
+        for p in processes:
+            p.join()
+        
+        # 結果を取得
+        hashes = {}
+        for filename, result in result_dict.items():
+            if result["error"]:
+                print(f"Error hashing file '{filename}': {result['error']}")
+            else:
+                hashes[filename] = result["hash"]
+        
+        return hashes
+
+
+def _compute_hashes_for_directory(directory, file_list, algorithm, num_processes):
+    """ディレクトリ内のファイルハッシュを計算し、結果の辞書を返す
+    enableMultiThreadHashingがTrueの場合、I/Oスレッド+マルチプロセス方式を使用
     
-    hashes = {}
-    with Pool(processes=num_processes) as pool:
-        results = list(tqdm(pool.imap_unordered(_calc_file_hash, args), total=len(file_list)))
+    Args:
+        directory (str): ディレクトリパス
+        file_list (list): ファイル一覧
+        algorithm (str): ハッシュアルゴリズム
+        num_processes (int): プロセス数
     
-    for result in results:
-        if result["error"]:
-            print(f"Error hashing file '{result['file']}': {result['error']}")
-        else:
-            hashes[result["file"]] = result["hash"]
-    
-    return hashes
+    Returns:
+        dict: ファイル名をキー、ハッシュ値を値とする辞書
+    """
+    if enableMultiThreadHashing:
+        return _compute_hashes_for_directory_threaded(directory, file_list, algorithm, num_processes)
+    else:
+        # 既存のマルチプロセス方式
+        current_dir_os = os.getcwd()
+        args = [(os.path.join(current_dir_os, directory, f), algorithm, chunkSize) for f in file_list]
+        
+        hashes = {}
+        with Pool(processes=num_processes) as pool:
+            results = list(tqdm(pool.imap_unordered(_calc_file_hash, args), total=len(file_list)))
+        
+        for result in results:
+            if result["error"]:
+                print(f"Error hashing file '{result['file']}': {result['error']}")
+            else:
+                hashes[result["file"]] = result["hash"]
+        
+        return hashes
 
 
 def speedtest():
@@ -162,7 +288,7 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
         return
 
     # プロセス数を自動決定（CPU コア数に基づく）
-    num_processes = cpu_count()
+    num_processes = int(cpu_count() / 2)
     print(f"Using {num_processes} processes for hashing...")
 
     # enableParallelDrivesに基づいて、並行実行または順次実行を選択
