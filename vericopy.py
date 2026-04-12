@@ -266,8 +266,18 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
         outputDir (str): 出力ディレクトリのパス
         algorithm (str): ハッシュアルゴリズムの名前（例: "sha256"） 規定は"sha512"
     """
-    print(f"Verifying files in '{inputDir}' against '{outputDir}' using {algorithm}...")
-    print(f"Chunk size: {chunkSize / (1024*1024):.1f} MB")
+    # ログファイルの初期設定
+    log_list = []
+    log_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file_path = os.path.join(logDir, f"{log_timestamp}.log")
+    
+    def log_output(message):
+        """ログメッセージを出力してリストに蓄積"""
+        print(message)
+        log_list.append(message)
+    
+    log_output(f"Verifying files in '{inputDir}' against '{outputDir}' using {algorithm}...")
+    log_output(f"Chunk size: {chunkSize / (1024*1024):.1f} MB")
     
     inputFiles  = []
     outputFiles = []
@@ -281,19 +291,19 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
             outputFiles.append(file)
 
     if not inputFiles:
-        print("Warning: No files found in input directory.")
+        log_output("Warning: No files found in input directory.")
         return
     if not outputFiles:
-        print("Warning: No files found in output directory.")
+        log_output("Warning: No files found in output directory.")
         return
 
     # プロセス数を自動決定（CPU コア数に基づく）
     num_processes = int(cpu_count() / 2)
-    print(f"Using {num_processes} processes for hashing...")
+    log_output(f"Using {num_processes} processes for hashing...")
 
     # enableParallelDrivesに基づいて、並行実行または順次実行を選択
     if enableParallelDrives:
-        print("\n[1/2] Computing hashes for input and output files in parallel...")
+        log_output("\n[1/2] Computing hashes for input and output files in parallel...")
         input_hashes = {}
         output_hashes = {}
         
@@ -306,15 +316,15 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
             output_hashes = output_future.result()
     else:
         # 順次実行：input -> output
-        print("\n[1/2] Computing hashes for input files...")
+        log_output("\n[1/2] Computing hashes for input files...")
         input_hashes = _compute_hashes_for_directory(inputDir, inputFiles, algorithm, num_processes)
         
-        print("\n[2/3] Computing hashes for output files...")
+        log_output("\n[2/3] Computing hashes for output files...")
         output_hashes = _compute_hashes_for_directory(outputDir, outputFiles, algorithm, num_processes)
 
     # 結果比較・出力
     comparison_step = "[2/2]" if enableParallelDrives else "[3/3]"
-    print(f"\n{comparison_step} Comparing results...")
+    log_output(f"\n{comparison_step} Comparing results...")
     
     # 統計情報とNot Matchファイル情報を記録
     matched_count = 0
@@ -322,18 +332,18 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
     
     for file in sorted(inputFiles):
         if file not in input_hashes:
-            print(f"Skipped       : {file} (hash calculation failed)")
+            log_output(f"Skipped       : {file} (hash calculation failed)")
             continue
         
         if file not in output_hashes:
-            print(f"File not found: {file}")
+            log_output(f"File not found: {file}")
             continue
         
         if input_hashes[file] == output_hashes[file]:
-            print(f"Match         : {file}")
+            log_output(f"Match         : {file}")
             matched_count += 1
         else:
-            print(f"Do not match  : {file}")
+            log_output(f"Do not match  : {file}")
             # Not Matchファイルの詳細情報を取得
             input_path = os.path.join(inputDir, file)
             output_path = os.path.join(outputDir, file)
@@ -357,11 +367,11 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
     # outputにのみ存在するファイルの報告
     for file in sorted(outputFiles):
         if file not in inputFiles:
-            print(f"Extra in output: {file}")
+            log_output(f"Extra in output: {file}")
 
     # ハッシュ値から逆引き辞書を作成し、異なるファイル名で同じハッシュを持つファイルを検出
     duplicate_step = "[3/3]" if enableParallelDrives else "[4/4]"
-    print(f"\n{duplicate_step} Checking for duplicate files with different names...")
+    log_output(f"\n{duplicate_step} Checking for duplicate files with different names...")
     hash_to_input_files = {}
     hash_to_output_files = {}
     
@@ -382,17 +392,17 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
     for hash_value, files in hash_to_input_files.items():
         if len(files) > 1:
             duplicates_found = True
-            print(f"[Input] Duplicate files with same hash {hash_value[:16]}...:")
+            log_output(f"[Input] Duplicate files with same hash {hash_value[:16]}...:")
             for file in sorted(files):
-                print(f"  - {file}")
+                log_output(f"  - {file}")
     
     # outputディレクトリ内で同じハッシュを持つ異なるファイルを検出
     for hash_value, files in hash_to_output_files.items():
         if len(files) > 1:
             duplicates_found = True
-            print(f"[Output] Duplicate files with same hash {hash_value[:16]}...:")
+            log_output(f"[Output] Duplicate files with same hash {hash_value[:16]}...:")
             for file in sorted(files):
-                print(f"  - {file}")
+                log_output(f"  - {file}")
     
     # inputとoutputの間で異なるファイル名で同じハッシュを持つ場合を検出
     for hash_value in hash_to_input_files.keys():
@@ -403,26 +413,26 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
             # ファイル名が異なる場合のみ報告
             if set(input_files) != set(output_files):
                 duplicates_found = True
-                print(f"[Cross-directory] Files with same hash {hash_value[:16]}... (different names):")
-                print(f"  Input:  {', '.join(sorted(input_files))}")
-                print(f"  Output: {', '.join(sorted(output_files))}")
+                log_output(f"[Cross-directory] Files with same hash {hash_value[:16]}... (different names):")
+                log_output(f"  Input:  {', '.join(sorted(input_files))}")
+                log_output(f"  Output: {', '.join(sorted(output_files))}")
     
     if not duplicates_found:
-        print("No duplicate files found with different names.")
+        log_output("No duplicate files found with different names.")
 
     # ========== 結果サマリー ==========
     not_matched_count = len(not_matched_files)
-    print(f"\n{'='*100}")
-    print(f"SUMMARY:")
-    print(f"  - Matched files:     {matched_count}")
-    print(f"  - Not matched files: {not_matched_count}")
-    print(f"{'='*100}")
+    log_output(f"\n{'='*100}")
+    log_output(f"SUMMARY:")
+    log_output(f"  - Matched files:     {matched_count}")
+    log_output(f"  - Not matched files: {not_matched_count}")
+    log_output(f"{'='*100}")
     
     # Not Matchファイルの詳細を表形式で出力
     if not_matched_files:
-        print("\n[NOT MATCHED FILES DETAILS]")
-        print(f"\n{'File Name':<30} | {'Size (Input / Output)':<22} | {'Modified Time (Input)':<19} | {'Modified Time (Output)':<19}")
-        print(f"{'-'*30}-+-{'-'*22}-+-{'-'*19}-+-{'-'*19}")
+        log_output("\n[NOT MATCHED FILES DETAILS]")
+        log_output(f"\n{'File Name':<30} | {'Size (Input / Output)':<22} | {'Modified Time (Input)':<19} | {'Modified Time (Output)':<19}")
+        log_output(f"{'-'*30}-+-{'-'*22}-+-{'-'*19}-+-{'-'*19}")
         
         for file_info in not_matched_files:
             file_name = file_info['file']
@@ -430,26 +440,32 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
             input_mtime = file_info['input_mtime']
             output_mtime = file_info['output_mtime']
             
-            print(f"{file_name:<30} | {sizes:<22} | {input_mtime:<19} | {output_mtime:<19}")
+            log_output(f"{file_name:<30} | {sizes:<22} | {input_mtime:<19} | {output_mtime:<19}")
         
-        print("\n[HASH VALUES]")
-        print(f"{'File Name':<30} | {'Input Hash':<65}")
-        print(f"{'-'*30}-+-{'-'*65}")
+        log_output("\n[HASH VALUES]")
+        log_output(f"{'File Name':<30} | {'Input Hash':<65}")
+        log_output(f"{'-'*30}-+-{'-'*65}")
         
         for file_info in not_matched_files:
             file_name = file_info['file']
             input_hash = file_info['input_hash']
-            print(f"{file_name:<30} | {input_hash:<65}")
+            log_output(f"{file_name:<30} | {input_hash:<65}")
         
-        print(f"\n{'File Name':<30} | {'Output Hash':<65}")
-        print(f"{'-'*30}-+-{'-'*65}")
+        log_output(f"\n{'File Name':<30} | {'Output Hash':<65}")
+        log_output(f"{'-'*30}-+-{'-'*65}")
         
         for file_info in not_matched_files:
             file_name = file_info['file']
             output_hash = file_info['output_hash']
-            print(f"{file_name:<30} | {output_hash:<65}")
+            log_output(f"{file_name:<30} | {output_hash:<65}")
 
-    print("\nVerification complete.")
+    log_output("\nVerification complete.")
+    
+    # ログファイルに一括出力
+    with open(log_file_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(log_list))
+    
+    print(f"\nLog file saved to: {log_file_path}")
 
 
 def main():
