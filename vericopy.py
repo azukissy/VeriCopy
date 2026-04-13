@@ -101,7 +101,7 @@ def _file_reader_thread(directory, file_list, chunk_queue, pbar):
             chunk_queue.put((os.path.basename(file), -2, str(e)))  # Error marker
 
 
-def _hash_calculator_worker(chunk_queue, result_dict, algorithm, num_files):
+def _hash_calculator_worker(chunk_queue, result_dict, algorithm, num_files, completed_count):
     """キューからチャンクを取得してハッシュを計算（マルチプロセス）
     
     Args:
@@ -109,6 +109,7 @@ def _hash_calculator_worker(chunk_queue, result_dict, algorithm, num_files):
         result_dict: 結果を格納する共有辞書
         algorithm (str): ハッシュアルゴリズム
         num_files (int): ファイル総数
+        completed_count: 完了ファイル数のカウンタ（Manager.Value）
     """
     hashers = {}
     completed_files = set()
@@ -123,6 +124,7 @@ def _hash_calculator_worker(chunk_queue, result_dict, algorithm, num_files):
         if flags == -2:  # Error
             result_dict[filename] = {"hash": None, "error": data}
             completed_files.add(filename)
+            completed_count.value += 1
             continue
         
         # Hasher初期化
@@ -142,6 +144,8 @@ def _hash_calculator_worker(chunk_queue, result_dict, algorithm, num_files):
         if flags == -1:  # EOF marker
             result_dict[filename] = {"hash": hashers[filename].hexdigest(), "error": None}
             completed_files.add(filename)
+            # 修正後（ロックなしで直接更新）
+            completed_count.value += 1
             del hashers[filename]
         else:  # データ処理
             hashers[filename].update(data)
@@ -162,6 +166,7 @@ def _compute_hashes_for_directory_threaded(directory, file_list, algorithm, num_
     with Manager() as manager:
         chunk_queue = manager.Queue(maxsize=num_processes * 2)
         result_dict = manager.dict()
+        completed_count = manager.Value('i', 0)  # 完了ファイル数のカウンタ
         
         # I/O用スレッドを起動
         reader_thread = Thread(
@@ -176,10 +181,22 @@ def _compute_hashes_for_directory_threaded(directory, file_list, algorithm, num_
         for _ in range(num_processes):
             p = Process(
                 target=_hash_calculator_worker,
-                args=(chunk_queue, result_dict, algorithm, len(file_list))
+                args=(chunk_queue, result_dict, algorithm, len(file_list), completed_count)
             )
             p.start()
             processes.append(p)
+        
+        # tqdmで進捗を表示しながら待機
+        with tqdm(total=len(file_list), desc="Computing hashes", unit="files") as pbar:
+            prev_count = 0
+            while completed_count.value < len(file_list):
+                current_count = completed_count.value
+                if current_count > prev_count:
+                    pbar.update(current_count - prev_count)
+                    prev_count = current_count
+                time.sleep(0.1)
+            # 最後の更新（念のため）
+            pbar.update(len(file_list) - prev_count)
         
         # スレッド・プロセスの終了を待つ
         reader_thread.join()
