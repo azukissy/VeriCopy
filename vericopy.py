@@ -286,7 +286,7 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
     # ログファイルの初期設定
     log_list = []
     log_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file_path = os.path.join(logDir, f"{log_timestamp}.log")
+    log_file_path = os.path.join(logDir, f"{log_timestamp}.txt")
     
     def log_output(message):
         """ログメッセージを出力してリストに蓄積"""
