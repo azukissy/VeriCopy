@@ -4,8 +4,8 @@ import time
 from multiprocessing import Pool, cpu_count, Queue, Manager, Process
 from concurrent.futures import ThreadPoolExecutor
 from threading import Thread
-from tqdm import tqdm
 from datetime import datetime
+from tqdm import tqdm
 
 # ----- Config Begin -----
 inputDir = r"input"
