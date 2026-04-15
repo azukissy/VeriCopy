@@ -1,0 +1,5 @@
+This is a test photo file #003.
+CORRUPTED - This file has been damaged during copying.
+The content is different from the original!
+Resolution: Unknown
+Format: CORRUPTED

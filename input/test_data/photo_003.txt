@@ -1,0 +1,4 @@
+This is a test photo file #003.
+The third test file for verification.
+Resolution: 4000x3000
+Format: JPEG
