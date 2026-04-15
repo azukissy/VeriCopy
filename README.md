@@ -38,6 +38,18 @@ To avoid critical vulnerabilities with CVSS scores of 7.0 or higher, please use 
 
 It is strongly recommended to keep your Python environment and all dependencies updated to the latest versions to maintain security.
 
+## Screenshots of the execution result
+### Exec command
+```
+python vericopy.py
+```
+
+### Success
+![Success](./screenshots/Success.png "./screenshots/Success.png")
+
+### NotMatch
+![Not Match](./screenshots/NotMatch.png "./screenshots/NotMatch.png")
+
 ## For developers
 1. 1st step  
 These folders are only valid locally and do not sync with Git.
