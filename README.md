@@ -1,3 +1,5 @@
+[![VeriCopy CI](https://github.com/azukissy/VeriCopy/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/azukissy/VeriCopy/actions/workflows/ci.yml)
+
 # VeriCopy
 I don’t want to lose even a single photo of my child.
 However, We don't have the money or space to keep expanding our storage indefinitely.
