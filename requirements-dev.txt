@@ -1,0 +1,9 @@
+# 本体の依存関係
+-r requirements.txt
+
+# テスト実行用
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# テストヘルパー
+pytest-xdist>=3.3.1
