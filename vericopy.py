@@ -123,9 +123,12 @@ def _compute_hashes_for_directory(directory: str, file_list: list, algorithm: st
     return hashes
 
 
-def speedtest():
+def speedtest(inputDir = "input"):
     """Hashアルゴリズムの速度テストを行う
-    目的は、ユーザーがHashアルゴリズムの信頼性と速度から選択できる為の指標を示すこと"""
+    目的は、ユーザーがHashアルゴリズムの信頼性と速度から選択できる為の指標を示すこと
+    
+    Args:
+        inputDir  (str): 入力ディレクトリのパス。既定値はvericopy.pyと同じディレクトリのinputディレクトリ"""
     # 各環境下でのHash計算速度を事前テスト
     # ユーザーがHashアルゴリズムの信頼性と速度から選択できる為の指標を示す
     result = [["Algorithm" ,"FileName", "CalcTime(ms)", "Result"]]
@@ -140,15 +143,12 @@ def speedtest():
                 elapsedTime = round((endTime - startTime) * 1000, 3)
                 if hash_value:
                     result.append([algorithm, f.name, elapsedTime, hash_value])
-                    # print(f.name)
-                    # print(hash_value)
     
     result2 = sorted(result)
     for row in result2:
-        # print(row[0], row[1], row[2], row[3])
         print(f"{row[0]:>9} :: {row[2]:>12} :: {row[1]} :: {row[3]}")
+    return
 
-    return 0
 
 def verify(inputDir, outputDir, algorithm = "sha512"):
     """inputDirとoutputDirのファイルを比較して、同一のファイルかどうかを確認する
@@ -157,7 +157,7 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
     Args:
         inputDir  (str): 入力ディレクトリのパス
         outputDir (str): 出力ディレクトリのパス
-        algorithm (str): ハッシュアルゴリズムの名前（例: "sha256"） 規定は"sha512"
+        algorithm (str): ハッシュアルゴリズムの名前（例: "sha256"） 規定値は"sha512"
     """
     # ログファイルの初期設定
     log_list = []
