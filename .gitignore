@@ -16,3 +16,6 @@ logs/
 !logs/.gitkeep
 
 __pycache__/*
+
+# venv/ フォルダ - 仮想環境は無視
+venv/
