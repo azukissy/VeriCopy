@@ -4,6 +4,7 @@ import time
 from multiprocessing import Pool, cpu_count
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from tqdm import tqdm
 import argparse
 
@@ -34,20 +35,39 @@ if not os.path.isdir(outputDir): os.makedirs(outputDir)
 if not os.path.isdir(logDir):    os.makedirs(logDir)
 
 
-def calchash(data, algorithm):
-    if algorithm == "md5": return hashlib.md5(data).hexdigest()
-    if algorithm == "sha1": return hashlib.sha1(data).hexdigest()
-    if algorithm == "sha224": return hashlib.sha224(data).hexdigest()
-    if algorithm == "sha256": return hashlib.sha256(data).hexdigest()
-    if algorithm == "sha384": return hashlib.sha384(data).hexdigest()
-    if algorithm == "sha512": return hashlib.sha512(data).hexdigest()
-    if algorithm == "sha3_224": return hashlib.sha3_224(data).hexdigest()
-    if algorithm == "sha3_256": return hashlib.sha3_256(data).hexdigest()
-    if algorithm == "sha3_384": return hashlib.sha3_384(data).hexdigest()
-    if algorithm == "sha3_512": return hashlib.sha3_512(data).hexdigest()
+def calchash(data: bytes, algorithm: str) -> Optional[str]:
+    hasher = get_hasher(algorithm)
+    if hasher is None:
+        return None
+    hasher.update(data)
+    return hasher.hexdigest()
 
 
-def _calc_file_hash(args: tuple) -> dict:
+def get_hasher(algorithm: str) -> Optional[Any]:
+    if algorithm == "md5":
+        return hashlib.md5()
+    if algorithm == "sha1":
+        return hashlib.sha1()
+    if algorithm == "sha224":
+        return hashlib.sha224()
+    if algorithm == "sha256":
+        return hashlib.sha256()
+    if algorithm == "sha384":
+        return hashlib.sha384()
+    if algorithm == "sha512":
+        return hashlib.sha512()
+    if algorithm == "sha3_224":
+        return hashlib.sha3_224()
+    if algorithm == "sha3_256":
+        return hashlib.sha3_256()
+    if algorithm == "sha3_384":
+        return hashlib.sha3_384()
+    if algorithm == "sha3_512":
+        return hashlib.sha3_512()
+    return None
+
+
+def _calc_file_hash(args: Tuple[str, str, int]) -> Dict[str, Optional[str]]:
     """ワーカー関数: ファイルのハッシュ値をチャンク単位で計算する
     
     各ファイルが独立した完全なプロセスで処理されるため、ファイル間のデータ混在は発生しない。
@@ -92,7 +112,7 @@ def _calc_file_hash(args: tuple) -> dict:
 
 
 
-def _compute_hashes_for_directory(directory: str, file_list: list, algorithm: str, num_processes: int) -> dict:
+def _compute_hashes_for_directory(directory: str, file_list: List[str], algorithm: str, num_processes: int, chunk_size: int) -> Dict[str, str]:
     """ディレクトリ内のファイルハッシュを計算し、結果の辞書を返す
     
     各ファイルが独立した完全なプロセスで処理されるため、ファイル間のデータ混在がない安全な実装。
@@ -103,12 +123,13 @@ def _compute_hashes_for_directory(directory: str, file_list: list, algorithm: st
         file_list (list): ファイル一覧
         algorithm (str): ハッシュアルゴリズム
         num_processes (int): プロセス数
+        chunk_size (int): 1回の読み込みで使用するバイト数
     
     Returns:
         dict: ファイル名をキー、ハッシュ値を値とする辞書
     """
     current_dir_os = os.getcwd()
-    args = [(os.path.join(current_dir_os, directory, f), algorithm, chunkSize) for f in file_list]
+    args = [(os.path.join(current_dir_os, directory, f), algorithm, chunk_size) for f in file_list]
     
     hashes = {}
     with Pool(processes=num_processes) as pool:
@@ -150,7 +171,15 @@ def speedtest(inputDir = "input"):
     return
 
 
-def verify(inputDir, outputDir, algorithm = "sha512"):
+def verify(
+    inputDir: str,
+    outputDir: str,
+    algorithm: str = "sha512",
+    chunk_size: Optional[int] = None,
+    enable_parallel_drives: Optional[bool] = None,
+    log_dir: Optional[str] = None,
+    logger: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
     """inputDirとoutputDirのファイルを比較して、同一のファイルかどうかを確認する
     enableParallelDrivesがTrueの場合、inputファイルとoutputファイルのハッシュ計算を並列実行する
     
@@ -158,19 +187,36 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
         inputDir  (str): 入力ディレクトリのパス
         outputDir (str): 出力ディレクトリのパス
         algorithm (str): ハッシュアルゴリズムの名前（例: "sha256"） 規定値は"sha512"
+        chunk_size (Optional[int]): 1回の読み込みで処理するデータサイズ（バイト）
+        enable_parallel_drives (Optional[bool]): input/outputが別ドライブの場合に並行実行を有効化
+        log_dir (Optional[str]): ログ出力先ディレクトリ
+        logger (Optional[Callable[[str], None]]): ログ出力用コールバック
     """
+    if chunk_size is None:
+        chunk_size = chunkSize
+    if enable_parallel_drives is None:
+        enable_parallel_drives = enableParallelDrives
+    if log_dir is None:
+        log_dir = logDir
+
+    if not os.path.isdir(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+
     # ログファイルの初期設定
-    log_list = []
+    log_list: List[str] = []
     log_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file_path = os.path.join(logDir, f"{log_timestamp}.txt")
+    log_file_path = os.path.join(log_dir, f"{log_timestamp}.txt")
     
-    def log_output(message):
+    def log_output(message: str) -> None:
         """ログメッセージを出力してリストに蓄積"""
-        print(message)
+        if logger:
+            logger(message)
+        else:
+            print(message)
         log_list.append(message)
     
     log_output(f"Verifying files in '{inputDir}' against '{outputDir}' using {algorithm}...")
-    log_output(f"Chunk size: {chunkSize / (1024*1024):.1f} MB")
+    log_output(f"Chunk size: {chunk_size / (1024*1024):.1f} MB")
     
     inputFiles  = []
     outputFiles = []
@@ -202,18 +248,18 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
         
         # ThreadPoolExecutorを使って、input と output の計算を並列実行
         with ThreadPoolExecutor(max_workers=2) as executor:
-            input_future = executor.submit(_compute_hashes_for_directory, inputDir, inputFiles, algorithm, num_processes)
-            output_future = executor.submit(_compute_hashes_for_directory, outputDir, outputFiles, algorithm, num_processes)
+            input_future = executor.submit(_compute_hashes_for_directory, inputDir, inputFiles, algorithm, num_processes, chunk_size)
+            output_future = executor.submit(_compute_hashes_for_directory, outputDir, outputFiles, algorithm, num_processes, chunk_size)
             
             input_hashes = input_future.result()
             output_hashes = output_future.result()
     else:
         # 順次実行：input -> output
         log_output("\n[1/2] Computing hashes for input files...")
-        input_hashes = _compute_hashes_for_directory(inputDir, inputFiles, algorithm, num_processes)
+        input_hashes = _compute_hashes_for_directory(inputDir, inputFiles, algorithm, num_processes, chunk_size)
         
         log_output("\n[2/3] Computing hashes for output files...")
-        output_hashes = _compute_hashes_for_directory(outputDir, outputFiles, algorithm, num_processes)
+        output_hashes = _compute_hashes_for_directory(outputDir, outputFiles, algorithm, num_processes, chunk_size)
 
     # 結果比較・出力
     comparison_step = "[2/2]" if enableParallelDrives else "[3/3]"
@@ -358,7 +404,17 @@ def verify(inputDir, outputDir, algorithm = "sha512"):
     with open(log_file_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(log_list))
     
-    print(f"\nLog file saved to: {log_file_path}")
+    log_output(f"\nLog file saved to: {log_file_path}")
+    return {
+        'log': log_list,
+        'log_file_path': log_file_path,
+        'matched_count': matched_count,
+        'not_matched_count': len(not_matched_files),
+        'not_matched_files': not_matched_files,
+        'input_files': inputFiles,
+        'output_files': outputFiles,
+        'duplicates_found': duplicates_found,
+    }
 
 
 if __name__ == '__main__':

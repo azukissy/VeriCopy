@@ -63,3 +63,13 @@ mkdir logs
 
 2. 2nd step  
 Develop!
+
+## GUI 使用方法
+
+以下のコマンドで Streamlit GUI を起動できます。
+
+```bash
+streamlit run streamlit_app.py
+```
+
+Windows ライクな外観で、`input`/`output` フォルダの検証を簡単に実行できます。
